@@ -1,22 +1,26 @@
 <?php
 /**
-* 
-*/
+ *
+ */
 require_once('api/DGControlSystem.php');
 $DG = new DGControlSystem();
 
-//удаляем все товары
-//$DG->products->delete_all_product();
-//удаляем все группы
-//$DG->products->delete_all_categories();
-
-
 
 foreach ($_POST as $k => $v) {
-         $category_id;
-         $request_categories = true;
-         $data = removeBOM($v);
-         $mass = @json_decode($data, true);
+
+    //удаляем товары на сайте
+    if ($k == "dell" && $v == 1) {
+        //удаляем все товары
+        $DG->products->delete_all_product();
+        //удаляем все группы
+        $DG->products->delete_all_categories();
+        break;
+    }
+
+    $category_id;
+    $request_categories = true;
+    $data = removeBOM($v);
+    $mass = @json_decode($data, true);
 
     switch (json_last_error()) {
         case JSON_ERROR_NONE:
@@ -44,83 +48,91 @@ foreach ($_POST as $k => $v) {
 
     echo PHP_EOL;
 
-        //делаем проверку на существование группы в базе
-        if(!empty($mass['groupe'])) {
-            print_r('Группа ' . $mass['groupe'] . "\r");
-            $query = $DG->db->placehold("SELECT id FROM s_categories WHERE name = ?", $mass['groupe']);
-            $DG->db->query($query);
-            $request_categories = $DG->db->result();
+    //записываем дату обновления
+    $q = $DG->db->placehold('UPDATE __settings SET value=? WHERE name=?', $mass['date'], 'data_update_1c');
+    $DG->db->query($q);
+    //echo($DG->db->result());
+
+    //загружаем товары на сайт
+    //делаем проверку на существование группы в базе
+    if (!empty($mass['groupe'])) {
+        print_r('Группа ' . $mass['groupe'] . "\r");
+        $query = $DG->db->placehold("SELECT id FROM s_categories WHERE name = ?", $mass['groupe']);
+        $DG->db->query($query);
+        $request_categories = $DG->db->result();
 
 
-            //создаем категорию
-            echo("Add groupe" . "\r");
-            $url_groupe_1 = str_replace(" ","_",$mass['groupe']);
-            $url_groupe_2 = str_replace(",","",$url_groupe_1);
-            $category = array(
-                "name" => $mass['groupe'],
-                "visible" => true,
-                "url" => $url_groupe_2
+        //создаем категорию
+        echo("Add groupe" . "\r");
+        $url_groupe_1 = str_replace(" ", "_", $mass['groupe']);
+        $url_groupe_2 = str_replace(",", "", $url_groupe_1);
+        $category = array(
+            "name" => $mass['groupe'],
+            "visible" => true,
+            "url" => $url_groupe_2
+        );
+
+        $category_id = $DG->categories->add_category($category);
+    }
+
+    if (!empty($category_id)) {
+        echo("groupe id " . $category_id . "\r");
+        foreach ($mass['produts'] as $r => $p) {
+
+            print_r('продукт ' . $p['name'] . "\r");
+            // print_r('артикул ' . $p['art']."\r");
+
+            //создаем сам продукт
+            $product = array(
+                "id" => "",
+                "name" => $p['art'],
+                "annotation" => $p['name'],
+                "url" => $p['art'],
+                "category_id" => $category_id,
+                "visible" => true
             );
 
-            $category_id = $DG->categories->add_category($category);
-        }
+            $product_id = $DG->products->add_product($product);
 
-        if (!empty($category_id)) {
-            echo("groupe id " .$category_id. "\r");
-            foreach ($mass['produts'] as $r => $p) {
+            //добавляем картинку
+            $file_name = $p['art'] . ".jpg";
+            $DG->products->add_image($product_id, $file_name);
 
-                print_r('продукт ' . $p['name'] . "\r");
-                // print_r('артикул ' . $p['art']."\r");
+            //обновляем категорию товара
+            $DG->categories->add_product_category($product_id, $category_id);
 
-                //создаем сам продукт
-                $product = array(
-                    "id" => "",
-                    "name" => $p['art'],
-                    "annotation" => $p['name'],
-                    "url" => $p['art'],
-                    "category_id" => $category_id,
-                    "visible" => true
-                );
+            //пробигаемся по характеристикам товарa
+            foreach ($p['props'] as $a => $f) {
 
-                $product_id = $DG->products->add_product($product);
-
-                //добавляем картинку
-                $file_name = $p['art'] . ".jpg";
-                $DG->products->add_image($product_id, $file_name);
-
-                //обновляем категорию товара
-                $DG->categories->add_product_category($product_id, $category_id);
-
-                //пробигаемся по характеристикам товарa
-                foreach ($p['props'] as $a => $f) {
-
-                    //делаем проверку на наличие
-                    if ($f['total'] > 0) {
-                        $avaliable = false;
-                    } else {
-                        $avaliable = true;
-                    }
-
-                    $variant = array(
-                        "product_id" => $product_id,
-                        "pod_zakaz" => $avaliable,
-                        "name" => $f['name'],
-                        "sku" => $f['sku'],
-                        "price" => $f['price'],
-                        "price_euro" => $f['priceEUR'],
-                        "stock" => $f['total']
-                    );
-                    $DG->variants->add_variant($variant);
-                    print_r('хар ' . $f['name'] . "\r");
+                //делаем проверку на наличие
+                if ($f['total'] > 0) {
+                    $avaliable = false;
+                } else {
+                    $avaliable = true;
                 }
 
+                $variant = array(
+                    "product_id" => $product_id,
+                    "pod_zakaz" => $avaliable,
+                    "name" => $f['name'],
+                    "sku" => $f['sku'],
+                    "price" => $f['price'],
+                    "price_euro" => $f['priceEUR'],
+                    "stock" => $f['total']
+                );
+                $DG->variants->add_variant($variant);
+                print_r('хар ' . $f['name'] . "\r");
             }
+
         }
+    }
 }
-function removeBOM($data) {
+function removeBOM($data)
+{
     if (0 === strpos(bin2hex($data), 'efbbbf')) {
         return substr($data, 3);
     }
     return $data;
 }
+
 ?>
